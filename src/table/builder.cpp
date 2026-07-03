@@ -198,7 +198,9 @@ void SsTableBuilder::add(KeySlice key, KeySlice value) {
 
     finish_block();
 
-    assert(builder_.add(key, value));
+    bool added = builder_.add(key, value);
+    assert(added);
+    (void)added;
     first_key_ = KeyVec::from_slice(key.raw_ref(), key.len());
     last_key_ = KeyVec::from_slice(key.raw_ref(), key.len());
 }

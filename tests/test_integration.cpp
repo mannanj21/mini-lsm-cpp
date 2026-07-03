@@ -71,7 +71,9 @@ TEST_F(IntegrationTest, FullLifecycle1000KeysSurvival) {
         }
         EXPECT_FALSE(iter.is_valid());
 
-        // Force flush and compaction
+        // Force flush and compaction — must freeze active memtable first
+        // so all puts (including recent overwrites) land in imm_memtables
+        db->inner->force_freeze_memtable();
         while (!db->inner->state->imm_memtables.empty()) {
             db->force_flush();
         }

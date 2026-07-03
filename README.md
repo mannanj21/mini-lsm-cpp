@@ -391,6 +391,16 @@ The fix: `force_freeze_memtable()` respects `options.enable_wal` and calls `MemT
 
 **Why this matters:** This is the exact failure mode that makes crash recovery implementations unreliable in practice. The WAL exists for durability; if you forget to attach it to newly created MemTables after a freeze, you have a silent hole that doesn't show up until you simulate a crash *between* a freeze and a flush.
 
+### Bug 3 — Side-Effecting Code Inside `assert(...)` Stripped in Release Builds
+
+In `SsTableBuilder::add()`, when a block filled up, the builder called `finish_block()` and then immediately added the new key to the fresh block using `assert(builder_.add(key, value))`. 
+
+In Debug builds (`-DCMAKE_BUILD_TYPE=Debug`), assertions are active, so `builder_.add()` executed normally and tests passed 100%. However, in Release builds (`-DCMAKE_BUILD_TYPE=Release`), `NDEBUG` is defined by CMake. Consequently, the preprocessor completely stripped `assert(...)`, causing `builder_.add(key, value)` to never execute when starting a new block! Every key that triggered a block transition was silently skipped.
+
+The fix: explicitly capture the boolean result into a local variable (`bool added = builder_.add(key, value);`) before asserting (`assert(added); (void)added;`). Additionally, GoogleTest comparisons involving non-owning `KeySlice` objects against stack-allocated `snprintf` buffers were updated to use owning `std::string` containers to prevent stack reclamation issues during evaluation.
+
+**Why this matters:** Placing state-mutating method calls inside `assert()` is a classic trap in systems programming. Always ensure assertions only inspect state or check side-effect-free return values.
+
 ---
 
 ## Performance

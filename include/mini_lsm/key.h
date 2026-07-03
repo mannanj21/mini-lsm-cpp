@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <ostream>
 
 namespace mini_lsm {
 
@@ -130,6 +131,14 @@ inline bool operator<(const KeySlice& lhs, const KeyVec& rhs) { return lhs < rhs
 inline bool operator>(const KeySlice& lhs, const KeyVec& rhs) { return lhs > rhs.as_key_slice(); }
 inline bool operator<=(const KeySlice& lhs, const KeyVec& rhs) { return lhs <= rhs.as_key_slice(); }
 inline bool operator>=(const KeySlice& lhs, const KeyVec& rhs) { return lhs >= rhs.as_key_slice(); }
+
+inline std::ostream& operator<<(std::ostream& os, const KeySlice& key) {
+    return os << key.to_string();
+}
+
+inline std::ostream& operator<<(std::ostream& os, const KeyVec& key) {
+    return os << key.as_key_slice().to_string();
+}
 
 } // namespace mini_lsm
 

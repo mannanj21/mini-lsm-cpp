@@ -161,13 +161,15 @@ TEST(MemTableTest, FlushProducesValidSstRoundTrip) {
         ASSERT_TRUE(sst_iter.is_valid());
         char kbuf[64];
         snprintf(kbuf, sizeof(kbuf), "prefix_common_key_%03d", i);
-        EXPECT_EQ(sst_iter.key(), KeySlice(kbuf));
+        std::string ks(kbuf);
+        EXPECT_EQ(sst_iter.key(), KeySlice(ks));
         if (i == 15) {
             EXPECT_EQ(sst_iter.value(), KeySlice(""));
         } else {
             char vbuf[64];
             snprintf(vbuf, sizeof(vbuf), "value_content_%03d", i);
-            EXPECT_EQ(sst_iter.value(), KeySlice(vbuf));
+            std::string vs(vbuf);
+            EXPECT_EQ(sst_iter.value(), KeySlice(vs));
         }
         sst_iter.next();
     }
