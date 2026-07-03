@@ -1,5 +1,7 @@
 # Mini-LSM C++ — Log-Structured Merge Tree Storage Engine
 
+[![CI](https://github.com/mannanj21/mini-lsm-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/mannanj21/mini-lsm-cpp/actions/workflows/ci.yml)
+
 A complete C++17 implementation of a Log-Structured Merge Tree (LSM-Tree) storage engine, ported from the [Mini-LSM](https://github.com/skyzh/mini-lsm) Rust tutorial series by Alex Chi Z.
 
 **37 tests · AddressSanitizer clean · ThreadSanitizer clean**
@@ -366,6 +368,28 @@ A JSON-lines file. Each line: `{"type": "...", ...}` followed by a CRC32. The en
 | `SimpleLeveled` | Simple size-ratio trigger between adjacent levels. |
 | `Tiered` | Write-optimized. Groups SSTables into tiers by size. |
 | `Leveled` | Space-efficient. Each level is fully sorted. |
+
+---
+
+## Engineering Notes
+
+Real bugs found and fixed during implementation — the kind of issues that only surface when you actually build the whole system end-to-end.
+
+### Bug 1 — `apply_compaction_result` incorrectly threw on `ForceFull` tasks
+
+`CompactionController::apply_compaction_result()` dispatched by controller type (SimpleLeveled / Tiered / Leveled / NoCompaction). The issue: `ForceFullCompaction` tasks are **strategy-agnostic** — they don't belong to any controller. The function threw `"NoCompaction controller cannot apply result"` even when the controller was `NoCompaction` and the task was a perfectly valid force-full compaction.
+
+The fix: check `task.type == ForceFull` **before** the controller switch and handle it inline — remove the input SSTables, replace L1 with the output SSTables, filter L0 accordingly. The controller never needs to know about it.
+
+**Why this matters:** This is exactly the class of bug that emerges at integration time when your compaction controller and your compaction executor are designed independently. The controller's job is to *decide when and what* to compact; the executor's job is to *do it and update state*. Mixing those responsibilities causes subtle crashes that only appear on `force_full_compaction()` calls — which are exactly what you'd call in tests.
+
+### Bug 2 — WAL-less MemTable created after freeze when WAL was enabled
+
+`force_freeze_memtable()` created the **replacement** active MemTable via `std::make_shared<MemTable>(id)` regardless of `options.enable_wal`. Consequence: if the DB was opened with WAL enabled, the MemTable was frozen (moved to the immutable list), and a new plain MemTable was created — **without a WAL file**. Any subsequent writes to that MemTable had no crash durability. On restart, those writes would be silently lost.
+
+The fix: `force_freeze_memtable()` respects `options.enable_wal` and calls `MemTable::create_with_wal(id, path_of_wal(id))` for the replacement. The test that caught it: the full-lifecycle integration test (`FullLifecycle1000KeysSurvival`) — it writes, freezes multiple times, closes, reopens, and verifies every key survived.
+
+**Why this matters:** This is the exact failure mode that makes crash recovery implementations unreliable in practice. The WAL exists for durability; if you forget to attach it to newly created MemTables after a freeze, you have a silent hole that doesn't show up until you simulate a crash *between* a freeze and a flush.
 
 ---
 
