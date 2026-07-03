@@ -103,6 +103,9 @@ Every mutation (freeze, flush, compaction apply) creates a new `shared_ptr<LsmSt
 ### Compaction controller dispatch
 `CompactionController::apply_compaction_result()` first checks if the task is `ForceFull` (handled inline, controller-agnostic), then dispatches to the strategy-specific impl. This allows `force_full_compaction()` to work with `NoCompaction` controller without throwing.
 
+### Release Build Integrity (`assert` behavior)
+In Release builds (`-DCMAKE_BUILD_TYPE=Release`), `NDEBUG` is defined by CMake. Any state-mutating method calls (like `builder_.add()`) placed inside `assert(...)` are stripped by the preprocessor. All mutations are performed explicitly before any assertions (`bool added = builder_.add(...); assert(added);`).
+
 ### Recovery sequence in `LsmStorageInner::open()`
 1. Check if MANIFEST exists.
 2. If not → fresh DB, create Manifest + WAL-backed MemTable, write `NewMemtable` record.
