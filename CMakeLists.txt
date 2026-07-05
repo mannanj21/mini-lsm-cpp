@@ -155,6 +155,7 @@ add_mini_lsm_test(test_leveled tests/test_leveled.cpp)
 add_mini_lsm_test(test_lsm_storage tests/test_lsm_storage.cpp)
 add_mini_lsm_test(test_compact tests/test_compact.cpp)
 add_mini_lsm_test(test_integration tests/test_integration.cpp)
+add_mini_lsm_test(test_compression tests/test_compression.cpp)
 
 # Benchmarks (opt-in, not part of ctest)
 option(MINI_LSM_BENCH "Build benchmark binaries" OFF)

@@ -81,6 +81,7 @@ struct SsTable {
 class SsTableBuilder {
 public:
     explicit SsTableBuilder(size_t block_size, CompressionType compression = CompressionType::None);
+    void set_compression(CompressionType compression) { compression_ = compression; }
 
     void add(KeySlice key, KeySlice value);
     void add(KeySlice key, const uint8_t* value_ptr, size_t value_len) {
