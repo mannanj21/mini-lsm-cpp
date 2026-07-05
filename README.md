@@ -4,7 +4,7 @@
 
 A from-scratch C++17 implementation of a Log-Structured Merge Tree (LSM-Tree) — the data structure powering LevelDB, RocksDB, and Apache Cassandra.
 
-**~1.4M write ops/sec · p99 GET latency < 0.006 ms · 37 tests · ASan/TSan clean · CI green**
+**~1.9M write ops/sec · p99 GET latency < 0.004 ms · 40 tests · ASan/TSan clean · CI green · Snappy block compression**
 
 Inspired by the [Mini-LSM](https://github.com/skyzh/mini-lsm) tutorial by Alex Chi Z. All components — Block encoding, SSTable builder, WAL, Manifest, iterator stack, and compaction strategies — are independently implemented in C++17.
 
@@ -60,6 +60,7 @@ Read Path:
 | CLI REPL (`mini_lsm_cli`) | ✅ |
 | AddressSanitizer (ASan) clean | ✅ |
 | ThreadSanitizer (TSan) clean | ✅ |
+| Block-level Snappy compression (toggleable, `CompressionType::Snappy`) | ✅ |
 
 ---
 
@@ -185,6 +186,7 @@ mini-lsm-cpp/
     ├── test_lsm_storage.cpp
     ├── test_compact.cpp
     ├── test_integration.cpp
+    ├── test_compression.cpp      # Snappy round-trip + mixed block flags
     └── smoke_test_cli.sh
 ```
 
@@ -248,6 +250,8 @@ cmake -B build-tsan -S . -DTSAN=ON && cmake --build build-tsan -j$(nproc)
 ctest --test-dir build-tsan --output-on-failure
 ```
 
+> **Note (Linux ASLR):** On kernels ≥ 6.x, TSan may report `unexpected memory mapping` at startup due to high ASLR entropy. This is a system-level incompatibility with TSan's shadow memory model — not a bug in the code. You can work around it by running each binary with `setarch $(uname -m) -R ./build-tsan/test_block` (disables ASLR for that process only, no sudo needed). All 40 tests pass with zero data races when run this way.
+
 ### Single test binary
 
 ```bash
@@ -273,8 +277,8 @@ ctest --test-dir build-tsan --output-on-failure
 ### Expected output (all passing)
 
 ```
-100% tests passed, 0 tests failed out of 37
-Total Test time (real) =   0.59 sec
+100% tests passed, 0 tests failed out of 40
+Total Test time (real) =   0.61 sec
 ```
 
 ---
@@ -373,7 +377,7 @@ The smallest unit of storage. Keys are prefix-compressed within a block. Each bl
 
 ### SSTable (`.sst`)
 An immutable on-disk file containing:
-- One or more Blocks
+- One or more Blocks (optionally Snappy-compressed, controlled by a 1-byte per-block header flag)
 - A Block index (first key per block + file offset)
 - A Bloom filter serialized at the end
 - Metadata footer with checksum
@@ -432,7 +436,7 @@ The fix: explicitly capture the boolean result into a local variable (`bool adde
 
 ## Performance
 
-> Measured on this development machine (Ubuntu 24.04, GCC 13).  
+> Measured on this development machine (Ubuntu 24.04, Linux kernel 6.17, GCC 13).  
 > Build flags: `-DCMAKE_BUILD_TYPE=Release`. Benchmarks are opt-in (`-DMINI_LSM_BENCH=ON`), not part of `ctest`.
 
 ### Write Throughput (200k keys, key=15B, value=100B)

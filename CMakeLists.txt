@@ -5,7 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Sanitizer options
+# Sanitizer options — flags must be semicolon-separated lists (not space-separated strings)
+# so CMake passes each as a separate compiler/linker argument.
 option(ASAN "Enable AddressSanitizer" OFF)
 option(TSAN "Enable ThreadSanitizer" OFF)
 
@@ -13,16 +14,12 @@ if(ASAN AND TSAN)
     message(FATAL_ERROR "ASAN and TSAN cannot be enabled simultaneously")
 endif()
 
-set(SANITIZER_FLAGS "")
 if(ASAN)
-    set(SANITIZER_FLAGS "-fsanitize=address -fno-omit-frame-pointer")
+    add_compile_options(-fsanitize=address;-fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address)
 elseif(TSAN)
-    set(SANITIZER_FLAGS "-fsanitize=thread")
-endif()
-
-if(SANITIZER_FLAGS)
-    add_compile_options(${SANITIZER_FLAGS})
-    add_link_options(${SANITIZER_FLAGS})
+    add_compile_options(-fsanitize=thread;-fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
 endif()
 
 # Find ZLIB (IEEE CRC32)
@@ -138,7 +135,10 @@ include(GoogleTest)
 function(add_mini_lsm_test test_name source_file)
     add_executable(${test_name} ${source_file})
     target_link_libraries(${test_name} PRIVATE mini_lsm gtest gtest_main)
-    gtest_discover_tests(${test_name})
+    # Use gtest_add_tests (static source parsing) instead of gtest_discover_tests
+    # (which executes the binary at cmake build-time). The latter crashes TSan
+    # on modern Linux kernels with ASLR mmap_rnd_bits > 28.
+    gtest_add_tests(TARGET ${test_name})
 endfunction()
 
 add_mini_lsm_test(test_block tests/test_block.cpp)
