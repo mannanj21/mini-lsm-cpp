@@ -28,6 +28,38 @@ endif()
 # Find ZLIB (IEEE CRC32)
 find_package(ZLIB REQUIRED)
 
+# Find Snappy (Block Compression)
+find_package(Snappy QUIET)
+if(NOT Snappy_FOUND)
+    find_library(SNAPPY_LIB NAMES snappy)
+    find_path(SNAPPY_INCLUDE_DIR NAMES snappy.h)
+    if(SNAPPY_LIB AND SNAPPY_INCLUDE_DIR)
+        set(Snappy_FOUND TRUE)
+        add_library(Snappy::snappy UNKNOWN IMPORTED)
+        set_target_properties(Snappy::snappy PROPERTIES
+            IMPORTED_LOCATION "${SNAPPY_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SNAPPY_INCLUDE_DIR}"
+        )
+    endif()
+endif()
+
+if(NOT Snappy_FOUND)
+    message(STATUS "Snappy system package not found, fetching via FetchContent...")
+    include(FetchContent)
+    FetchContent_Declare(
+        snappy
+        URL https://github.com/google/snappy/archive/refs/tags/1.2.1.tar.gz
+    )
+    set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+    set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(snappy)
+    if(TARGET snappy)
+        add_library(Snappy::snappy ALIAS snappy)
+        set(Snappy_FOUND TRUE)
+    endif()
+endif()
+
 # Fetch third-party libraries
 include(FetchContent)
 
@@ -86,6 +118,14 @@ set(MINI_LSM_SOURCES
 add_library(mini_lsm ${MINI_LSM_SOURCES})
 target_include_directories(mini_lsm PUBLIC include)
 target_link_libraries(mini_lsm PUBLIC ZLIB::ZLIB nlohmann_json::nlohmann_json farmhash pthread)
+
+if(Snappy_FOUND OR TARGET Snappy::snappy)
+    message(STATUS "Snappy found — block compression enabled")
+    target_link_libraries(mini_lsm PUBLIC Snappy::snappy)
+    target_compile_definitions(mini_lsm PUBLIC MINI_LSM_SNAPPY=1)
+else()
+    message(STATUS "Snappy not found — building without block compression")
+endif()
 
 # CLI Binary
 add_executable(mini_lsm_cli bin/mini_lsm_cli.cpp)
