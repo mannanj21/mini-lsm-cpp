@@ -10,6 +10,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if defined(MINI_LSM_SNAPPY) && MINI_LSM_SNAPPY
+#include <snappy.h>
+#endif
+
 namespace mini_lsm {
 
 FileObject::FileObject(int fd, uint64_t sz)
@@ -155,14 +159,31 @@ std::shared_ptr<Block> SsTable::read_block(size_t block_idx) {
     assert(block_idx < block_meta.size());
     size_t offset = block_meta[block_idx].offset;
     size_t offset_end = (block_idx + 1 < block_meta.size()) ? block_meta[block_idx + 1].offset : block_meta_offset;
-    size_t block_len = offset_end - offset - 4;
+    size_t block_len_with_flag = offset_end - offset - 4;
     auto data_with_chksum = file.read(offset, offset_end - offset);
-    uint32_t expected_checksum = read_u32_be(data_with_chksum.data() + block_len);
-    uint32_t actual_checksum = crc32_hash(data_with_chksum.data(), block_len);
+    uint32_t expected_checksum = read_u32_be(data_with_chksum.data() + block_len_with_flag);
+    uint32_t actual_checksum = crc32_hash(data_with_chksum.data(), block_len_with_flag);
     if (expected_checksum != actual_checksum) {
         throw std::runtime_error("block checksum mismatched");
     }
-    return std::make_shared<Block>(Block::decode(data_with_chksum.data(), block_len));
+    uint8_t flag_byte = data_with_chksum[0];
+    if (flag_byte == 0x00) {
+        return std::make_shared<Block>(Block::decode(data_with_chksum.data() + 1, block_len_with_flag - 1));
+    }
+#if defined(MINI_LSM_SNAPPY) && MINI_LSM_SNAPPY
+    if (flag_byte == 0x01) {
+        std::string uncompressed_str;
+        if (!snappy::Uncompress(reinterpret_cast<const char*>(data_with_chksum.data() + 1), block_len_with_flag - 1, &uncompressed_str)) {
+            throw std::runtime_error("failed to uncompress snappy block");
+        }
+        return std::make_shared<Block>(Block::decode(reinterpret_cast<const uint8_t*>(uncompressed_str.data()), uncompressed_str.size()));
+    }
+#else
+    if (flag_byte == 0x01) {
+        throw std::runtime_error("block was compressed with Snappy, but Snappy support is not enabled in this build");
+    }
+#endif
+    throw std::runtime_error("unknown compression flag: " + std::to_string(flag_byte));
 }
 
 std::shared_ptr<Block> SsTable::read_block_cached(size_t block_idx) {
@@ -215,7 +236,17 @@ void SsTableBuilder::finish_block() {
     }
     BlockBuilder new_builder(block_size_);
     std::swap(builder_, new_builder);
-    auto encoded_block = new_builder.build().encode();
+    std::vector<uint8_t> block_data = new_builder.build().encode();
+    uint8_t flag_byte = 0x00; // uncompressed
+
+#if defined(MINI_LSM_SNAPPY) && MINI_LSM_SNAPPY
+    if (compression_ == CompressionType::Snappy) {
+        std::string compressed_str;
+        snappy::Compress(reinterpret_cast<const char*>(block_data.data()), block_data.size(), &compressed_str);
+        block_data.assign(compressed_str.begin(), compressed_str.end());
+        flag_byte = 0x01;
+    }
+#endif
 
     meta_.push_back(BlockMeta{
         data_.size(),
@@ -223,8 +254,10 @@ void SsTableBuilder::finish_block() {
         std::move(last_key_)
     });
 
-    uint32_t checksum = crc32_hash(encoded_block.data(), encoded_block.size());
-    data_.insert(data_.end(), encoded_block.begin(), encoded_block.end());
+    data_.push_back(flag_byte);
+    data_.insert(data_.end(), block_data.begin(), block_data.end());
+
+    uint32_t checksum = crc32_hash(&data_[data_.size() - block_data.size() - 1], block_data.size() + 1);
     put_u32_be(data_, checksum);
 }
 
