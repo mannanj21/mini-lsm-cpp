@@ -438,25 +438,27 @@ The fix: explicitly capture the boolean result into a local variable (`bool adde
 ### Write Throughput (200k keys, key=15B, value=100B)
 
 | Strategy | Ops/sec | MB/sec | Write Amp | On-disk Size |
-|----------|---------|--------|-----------|------|
-| NoCompaction | ~1,050,000 | ~115 | 0.1× | 1 MB |
-| SimpleLeveled | ~1,425,000 | ~156 | 0.3× | 5 MB |
-| Tiered | ~1,430,000 | ~157 | 0.3× | 5 MB |
-| Leveled | ~1,415,000 | ~155 | 0.3× | 5 MB |
+|----------|---------|--------|-----------|--------------|
+| **NoCompaction** | ~1,544,000 | ~169 | 0.1× | 1,024 KB (1 MB) |
+| **SimpleLeveled** | ~1,744,000 | ~191 | 0.2× | 3 MB |
+| **Tiered** | ~1,816,000 | ~199 | 0.2× | 3 MB |
+| **Leveled** | ~1,405,000 | ~154 | 0.3× | 5 MB |
+| **NoCompact (Snappy)** | ~1,872,000 | ~205 | 0.0× | **328 KB (3.12× smaller)** |
+| **Leveled (Snappy)** | ~1,873,000 | ~205 | 0.0× | **657 KB (7.6× smaller)** |
 
-*Write amplification = bytes written to disk / bytes written by user. Lower is better for write-heavy workloads.*
+*Write amplification = bytes written to disk / bytes written by user. Notably, enabling Snappy compression **increases write throughput by ~21–33%** because reducing disk I/O volume outweighs the CPU cost of compression!*
 
-### Read Performance (50k random GETs after 200k keys loaded)
+### Read Performance & Snappy Compression Impact (50k random GETs after 200k keys loaded)
 
-| Metric | Result |
-|--------|--------|
-| GET throughput | ~600,000 ops/sec |
-| GET latency p50 | < 0.002 ms |
-| GET latency p99 | < 0.006 ms |
-| GET latency p999 | < 0.013 ms |
-| Miss GET throughput (Bloom filter) | ~510,000 ops/sec |
-| Miss GET latency p99 | < 0.004 ms |
-| Sequential scan throughput | ~5,150,000 keys/sec |
+| Metric | Uncompressed (None) | Snappy Compressed | Impact / Overhead |
+|--------|---------------------|-------------------|-------------------|
+| **On-disk Storage Size** | 1,024 KB | **328 KB** | **3.12× compression ratio (~68% savings)** |
+| **Point GET throughput** | ~803,000 ops/sec | ~801,000 ops/sec | **< 0.3% overhead** |
+| **GET latency p50** | 0.001 ms | 0.001 ms | 0 ms diff |
+| **GET latency p99** | 0.004 ms | 0.004 ms | 0 ms diff |
+| **GET latency p999** | 0.012 ms | 0.015 ms | +0.003 ms |
+| **Miss GET throughput (Bloom)** | ~680,000 ops/sec | ~615,000 ops/sec | Bloom filters reject before block I/O |
+| **Sequential scan throughput** | ~6,377,000 keys/sec | ~6,093,000 keys/sec | ~4.4% overhead on full scans |
 
 *Miss GET latency is lower than existing-key GET because Bloom filters reject non-existent keys before any block I/O.*
 

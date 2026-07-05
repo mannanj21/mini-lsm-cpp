@@ -123,6 +123,30 @@ int main() {
         results.push_back(run_write_bench("Leveled", opts, NUM_KEYS, VAL_SIZE));
     }
 
+    // 5. NoCompaction (Snappy)
+    {
+        auto opts = LsmStorageOptions::default_for_week1_test();
+        opts.block_size = 4096;
+        opts.target_sst_size = 2 << 20;
+        opts.compression = CompressionType::Snappy;
+        results.push_back(run_write_bench("NoCompact (Snappy)", opts, NUM_KEYS, VAL_SIZE));
+    }
+
+    // 6. Leveled (Snappy)
+    {
+        LeveledCompactionOptions lev_opts;
+        lev_opts.level_size_multiplier = 2;
+        lev_opts.level0_file_num_compaction_trigger = 2;
+        lev_opts.max_levels = 4;
+        lev_opts.base_level_size_mb = 16;
+        auto opts = LsmStorageOptions::default_for_week2_test(
+            CompactionOptions::leveled(lev_opts));
+        opts.block_size = 4096;
+        opts.target_sst_size = 2 << 20;
+        opts.compression = CompressionType::Snappy;
+        results.push_back(run_write_bench("Leveled (Snappy)", opts, NUM_KEYS, VAL_SIZE));
+    }
+
     // Print results table
     printf("  %-20s  %14s  %10s  %12s  %14s\n",
            "Strategy", "Ops/sec", "MB/sec", "Write Amp", "Disk Size");

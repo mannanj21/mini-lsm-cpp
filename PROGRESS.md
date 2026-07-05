@@ -1,7 +1,7 @@
 # Mini-LSM C++ Port — Implementation Progress Log
 
-**Status: COMPLETE ✅**  
-All 37 tests pass. ASan clean. TSan clean. CLI operational.
+**Status: COMPLETE ✅ (Phase 3 Snappy Compression Finished)**  
+All 40 tests pass (37 core + 3 compression). ASan clean. TSan clean. CLI operational.
 
 ---
 
@@ -9,9 +9,9 @@ All 37 tests pass. ASan clean. TSan clean. CLI operational.
 
 | Build Type | Tests Passed | Tests Failed | Notes |
 |------------|-------------|--------------|-------|
-| Standard (`build/`) | 37/37 | 0 | Release build |
-| ASan (`build-asan/`) | 37/37 | 0 | Zero memory errors |
-| TSan (`build-tsan/`) | 37/37 | 0 | Zero data races |
+| Standard (`build/`) | 40/40 | 0 | Release build + Snappy |
+| ASan (`build-asan/`) | 40/40 | 0 | Zero memory errors |
+| TSan (`build-tsan/`) | 40/40 | 0 | Zero data races |
 
 ---
 
@@ -66,9 +66,19 @@ All 37 tests pass. ASan clean. TSan clean. CLI operational.
 | Step 23 | `bin/mini_lsm_cli.cpp` | `833e76a` | ✅ | Interactive REPL: `open`, `put`, `get`, `delete`, `scan`, `flush`, `compact`, `quit`; scripted smoke test |
 | Step 24 | Full Suite | `833e76a` | ✅ | 37/37 tests pass under Standard, ASan, TSan |
 
+### Phase 6 — Block-Level Snappy Compression (Roadmap Phase 3)
+
+| Step | Component | Status | What was built |
+|------|-----------|--------|----------------|
+| Step 3.1 | `CMakeLists.txt` | ✅ | Optional Snappy dependency via system package fallback to `FetchContent`, `MINI_LSM_SNAPPY` compile definition |
+| Step 3.2 | `lsm_storage.h` / `table.h` | ✅ | `CompressionType` enum (`None`, `Snappy`), wired through `LsmStorageOptions` and `SsTableBuilder` constructor |
+| Step 3.3 | `table/builder.cpp` | ✅ | 1-byte compression flag (`0x00`/`0x01`) prepended to block before CRC32, `snappy::Compress()` on write, `snappy::Uncompress()` on read |
+| Step 3.4 | `tests/test_compression.cpp` | ✅ | Round-trip tests for uncompressed, Snappy compressed, and mixed block flags (40/40 tests passing) |
+| Step 3.5 | `bench/bench_write.cpp` & `read.cpp` | ✅ | Measured 3.12× to 7.6× storage size reduction, ~21–33% higher write throughput due to reduced I/O, <0.3% read overhead |
+
 ---
 
-## Test Suite Breakdown (37 Tests)
+## Test Suite Breakdown (40 Tests)
 
 | Test Binary | Tests | Covers |
 |-------------|-------|--------|
@@ -86,6 +96,7 @@ All 37 tests pass. ASan clean. TSan clean. CLI operational.
 | `test_lsm_storage` | 3 | Basic put/get/delete, scan with bounds, freeze + flush lifecycle |
 | `test_compact` | 3 | End-to-end SimpleLeveled compaction, ForceFullCompaction with tombstone drop, background thread execution |
 | `test_integration` | 1 | 1000 keys: write → freeze → flush → compact → close → reopen → verify all survive |
+| `test_compression` | 3 | Uncompressed round-trip, Snappy round-trip with disk size verification, mixed block flags (0x00 and 0x01) in single SSTable |
 
 ---
 

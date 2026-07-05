@@ -1,6 +1,7 @@
 // bench_read.cpp — Read throughput and latency benchmark
 // Measures: point GET ops/sec, p50/p99/p999 latency, Bloom filter
-// effectiveness on non-existent keys, and sequential scan throughput.
+// effectiveness on non-existent keys, and sequential scan throughput
+// across both uncompressed and Snappy-compressed DBs.
 //
 // Build: cmake -B build-bench -S . -DMINI_LSM_BENCH=ON -DCMAKE_BUILD_TYPE=Release
 //         cmake --build build-bench -j$(nproc)
@@ -13,14 +14,14 @@
 using namespace mini_lsm;
 using namespace mini_lsm::bench;
 
-int main() {
+void run_read_suite(const char* label, const std::string& db_name, CompressionType comp) {
     const int    NUM_WRITE   = 200'000;   // keys to pre-populate
     const int    NUM_READ    = 50'000;    // random GETs to measure
     const int    NUM_MISS    = 50'000;    // non-existent key GETs
     const size_t VAL_SIZE    = 100;
 
     printf("\n");
-    print_header("Mini-LSM Read Performance Benchmark");
+    print_header(label);
     printf("  Pre-populate: %d keys (%zu-byte values)\n", NUM_WRITE, VAL_SIZE);
     printf("  Random GET:   %d operations\n", NUM_READ);
     printf("  Miss GET:     %d operations (non-existent keys)\n", NUM_MISS);
@@ -30,11 +31,12 @@ int main() {
     printf("  [1/4] Loading %d keys...\n", NUM_WRITE);
 
     auto opts = LsmStorageOptions::default_for_week1_test();
-    opts.block_size    = 4096;
+    opts.block_size      = 4096;
     opts.target_sst_size = 2 << 20;
-    opts.enable_wal    = false;
+    opts.enable_wal      = false;
+    opts.compression     = comp;
 
-    TempDB tdb("read_bench", opts);
+    TempDB tdb(db_name, opts);
     MiniLsm* db = tdb.db();
 
     for (int i = 0; i < NUM_WRITE; ++i) {
@@ -58,7 +60,6 @@ int main() {
             Timer t;
             auto val = db->get(KeySlice(gen_key(key_idx)));
             hist.record(t.elapsed_us());
-            // Sanity: value must exist
             (void)val;
         }
 
@@ -76,7 +77,6 @@ int main() {
     printf("  [3/4] Non-existent key GET (%d ops, keys > %d)...\n",
            NUM_MISS, NUM_WRITE);
     {
-        // Use key range that definitely doesn't exist: NUM_WRITE .. NUM_WRITE*2
         LatencyHistogram hist;
         Timer total;
 
@@ -91,8 +91,6 @@ int main() {
         double wall_ms   = total.elapsed_ms();
         double ops_s     = NUM_MISS / (wall_ms / 1000.0);
 
-        // If Bloom filters are working, miss latency should be much lower
-        // than hit latency (no block reads necessary)
         printf("    Throughput:  %.0f ops/sec\n", ops_s);
         printf("    Latency p50: %.3f ms\n", hist.p50()  / 1000.0);
         printf("    Latency p99: %.3f ms\n", hist.p99()  / 1000.0);
@@ -120,6 +118,14 @@ int main() {
         printf("    Scan time:    %.1f ms\n", wall_ms);
         printf("\n");
     }
+}
+
+int main() {
+    printf("\n");
+    print_header("Mini-LSM Read Performance & Compression Comparison");
+
+    run_read_suite("Read Benchmark — Uncompressed (None)", "read_none", CompressionType::None);
+    run_read_suite("Read Benchmark — Snappy Compressed", "read_snappy", CompressionType::Snappy);
 
     print_separator();
     printf("  Note: run on the same machine to compare strategies.\n");
