@@ -29,6 +29,7 @@ struct LsmStorageOptions {
     CompactionOptions compaction_options{CompactionOptions::no_compaction()};
     bool enable_wal{false};
     bool serializable{false};
+    CompressionType compression{CompressionType::None};
 
     static LsmStorageOptions default_for_week1_test();
     static LsmStorageOptions default_for_week1_day6_test();

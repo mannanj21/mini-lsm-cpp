@@ -209,7 +209,7 @@ std::vector<std::shared_ptr<SsTable>> LsmStorageInner::compact_generate_sst_from
 
     while (iter.is_valid()) {
         if (!builder) {
-            builder = std::make_unique<SsTableBuilder>(options.block_size);
+            builder = std::make_unique<SsTableBuilder>(options.block_size, options.compression);
         }
         if (compact_to_bottom_level) {
             if (!iter.value().is_empty()) {

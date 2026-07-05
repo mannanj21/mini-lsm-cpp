@@ -182,8 +182,8 @@ size_t SsTable::find_block_idx(KeySlice key) {
     return idx > 0 ? idx - 1 : 0;
 }
 
-SsTableBuilder::SsTableBuilder(size_t block_size)
-    : builder_(block_size), block_size_(block_size) {}
+SsTableBuilder::SsTableBuilder(size_t block_size, CompressionType compression)
+    : builder_(block_size), block_size_(block_size), compression_(compression) {}
 
 void SsTableBuilder::add(KeySlice key, KeySlice value) {
     if (first_key_.is_empty()) {

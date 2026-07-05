@@ -134,7 +134,7 @@ void LsmStorageInner::force_flush_next_imm_memtable() {
         flush_memtable = state->imm_memtables.back();
     }
 
-    SsTableBuilder builder(options.block_size);
+    SsTableBuilder builder(options.block_size, options.compression);
     flush_memtable->flush(builder);
     size_t sst_id = flush_memtable->id();
     auto sst = builder.build(sst_id, block_cache, path_of_sst_val(sst_id));

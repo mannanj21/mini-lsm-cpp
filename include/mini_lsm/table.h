@@ -12,6 +12,11 @@
 
 namespace mini_lsm {
 
+enum class CompressionType : uint8_t {
+    None = 0x00,
+    Snappy = 0x01
+};
+
 class BlockCache;
 
 struct Bloom {
@@ -75,7 +80,7 @@ struct SsTable {
 
 class SsTableBuilder {
 public:
-    explicit SsTableBuilder(size_t block_size);
+    explicit SsTableBuilder(size_t block_size, CompressionType compression = CompressionType::None);
 
     void add(KeySlice key, KeySlice value);
     void add(KeySlice key, const uint8_t* value_ptr, size_t value_len) {
@@ -95,6 +100,7 @@ private:
     std::vector<uint8_t> data_;
     std::vector<BlockMeta> meta_;
     size_t block_size_;
+    CompressionType compression_{CompressionType::None};
     std::vector<uint32_t> key_hashes_;
 };
 
