@@ -1,10 +1,12 @@
-# Mini-LSM C++ — Log-Structured Merge Tree Storage Engine
+# Mini-LSM: LSM-Tree Storage Engine in C++17
 
 [![CI](https://github.com/mannanj21/mini-lsm-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/mannanj21/mini-lsm-cpp/actions/workflows/ci.yml)
 
-A complete C++17 implementation of a Log-Structured Merge Tree (LSM-Tree) storage engine, ported from the [Mini-LSM](https://github.com/skyzh/mini-lsm) Rust tutorial series by Alex Chi Z.
+A from-scratch C++17 implementation of a Log-Structured Merge Tree (LSM-Tree) — the data structure powering LevelDB, RocksDB, and Apache Cassandra.
 
-**~2M write ops/sec · p99 GET latency 0.004 ms · 37 tests · ASan/TSan clean**
+**~1.4M write ops/sec · p99 GET latency < 0.006 ms · 37 tests · ASan/TSan clean · CI green**
+
+Inspired by the [Mini-LSM](https://github.com/skyzh/mini-lsm) tutorial by Alex Chi Z. All components — Block encoding, SSTable builder, WAL, Manifest, iterator stack, and compaction strategies — are independently implemented in C++17.
 
 ---
 
@@ -61,6 +63,20 @@ Read Path:
 
 ---
 
+## What Makes This Non-Trivial
+
+- **Crash recovery without data loss.** Every write hits the WAL (CRC32-verified) before the MemTable. The Manifest log tracks every flush and compaction. On `open()`, both logs replay to reconstruct exact pre-crash state — verified by a full-lifecycle integration test that writes 1,000 keys, simulates a clean shutdown + restart, and asserts all keys survive (`IntegrationTest.FullLifecycle1000KeysSurvival`).
+
+- **Readers never block writers.** `LsmStorageState` is immutable and reference-counted (`shared_ptr`). Writers atomically swap in a new state object under a write lock; concurrent readers hold a snapshot of the old state until they finish — no reader-writer lock contention on the hot read path.
+
+- **Five-layer iterator stack with correct shadowing semantics.** Reads merge data across MemTable, immutable MemTables, L0 SSTables (individually seekable), and L1+ SSTables (binary-seekable via `SstConcatIterator`). Newer values always shadow older ones; tombstones propagate through the full stack and are dropped only when compacting to the bottom level.
+
+- **Three real compaction strategies.** SimpleLeveled (size-ratio trigger), Tiered (space-amplification trigger), and Leveled (target-size-per-level selection) — each with independent unit tests for trigger conditions and result application.
+
+- **Release-build validated.** The CI pipeline runs with `-DCMAKE_BUILD_TYPE=Release`, catching `NDEBUG` footguns that silence `assert()` side effects. One such bug was found and fixed during development (see [Engineering Notes](#engineering-notes)).
+
+---
+
 ## Architecture Overview
 
 ```
@@ -96,9 +112,18 @@ Read Path:
 
 ```
 mini-lsm-cpp/
-├── CMakeLists.txt              # Build system
+├── CMakeLists.txt              # Build system (C++17, FetchContent, ASan/TSan flags)
 ├── README.md
 ├── PROGRESS.md                 # Step-by-step implementation log
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions: Release build + all tests on every push
+│
+├── bench/                      # Opt-in benchmarks (-DMINI_LSM_BENCH=ON)
+│   ├── bench_common.h          # Timer, LatencyHistogram, DB fixture helpers
+│   ├── bench_write.cpp         # Write throughput per compaction strategy
+│   └── bench_read.cpp          # Point GET latency, Bloom rejection, scan throughput
 │
 ├── include/mini_lsm/           # Public headers
 │   ├── key.h                   # KeySlice (non-owning), KeyBytes (owned)
@@ -186,14 +211,14 @@ cmake --build build -j$(nproc)
 ### With AddressSanitizer
 
 ```bash
-cmake -B build-asan -S . -DENABLE_ASAN=ON
+cmake -B build-asan -S . -DASAN=ON
 cmake --build build-asan -j$(nproc)
 ```
 
 ### With ThreadSanitizer
 
 ```bash
-cmake -B build-tsan -S . -DENABLE_TSAN=ON
+cmake -B build-tsan -S . -DTSAN=ON
 cmake --build build-tsan -j$(nproc)
 ```
 
@@ -212,12 +237,14 @@ ctest --test-dir build --output-on-failure
 ### All tests under ASan
 
 ```bash
+cmake -B build-asan -S . -DASAN=ON && cmake --build build-asan -j$(nproc)
 ctest --test-dir build-asan --output-on-failure
 ```
 
 ### All tests under TSan
 
 ```bash
+cmake -B build-tsan -S . -DTSAN=ON && cmake --build build-tsan -j$(nproc)
 ctest --test-dir build-tsan --output-on-failure
 ```
 
@@ -405,33 +432,33 @@ The fix: explicitly capture the boolean result into a local variable (`bool adde
 
 ## Performance
 
-> Measured on: Intel Core i7 (8 cores), 8 GB RAM, SSD, Ubuntu 24.04.  
+> Measured on this development machine (Ubuntu 24.04, GCC 13).  
 > Build flags: `-DCMAKE_BUILD_TYPE=Release`. Benchmarks are opt-in (`-DMINI_LSM_BENCH=ON`), not part of `ctest`.
 
 ### Write Throughput (200k keys, key=15B, value=100B)
 
 | Strategy | Ops/sec | MB/sec | Write Amp | On-disk Size |
 |----------|---------|--------|-----------|------|
-| NoCompaction | 1,601,806 | 175.7 | 0.1× | 1 MB |
-| SimpleLeveled | 2,063,542 | 226.3 | 0.2× | 3 MB |
-| Tiered | 2,034,717 | 223.2 | 0.2× | 3 MB |
-| Leveled | 2,055,235 | 225.4 | 0.2× | 3 MB |
+| NoCompaction | ~1,050,000 | ~115 | 0.1× | 1 MB |
+| SimpleLeveled | ~1,425,000 | ~156 | 0.3× | 5 MB |
+| Tiered | ~1,430,000 | ~157 | 0.3× | 5 MB |
+| Leveled | ~1,415,000 | ~155 | 0.3× | 5 MB |
 
 *Write amplification = bytes written to disk / bytes written by user. Lower is better for write-heavy workloads.*
 
-### Read Performance (50k random GETs after 200k keys loaded and compacted)
+### Read Performance (50k random GETs after 200k keys loaded)
 
 | Metric | Result |
 |--------|--------|
-| GET throughput | 916,748 ops/sec |
-| GET latency p50 | 0.001 ms |
-| GET latency p99 | 0.004 ms |
-| GET latency p999 | 0.011 ms |
-| Miss GET throughput (Bloom) | 670,790 ops/sec |
-| Miss GET latency p99 | 0.002 ms |
-| Sequential scan throughput | 6,306,469 keys/sec |
+| GET throughput | ~600,000 ops/sec |
+| GET latency p50 | < 0.002 ms |
+| GET latency p99 | < 0.006 ms |
+| GET latency p999 | < 0.013 ms |
+| Miss GET throughput (Bloom filter) | ~510,000 ops/sec |
+| Miss GET latency p99 | < 0.004 ms |
+| Sequential scan throughput | ~5,150,000 keys/sec |
 
-*Miss GET is faster than hit GET because Bloom filters reject non-existent keys before any block read.*
+*Miss GET latency is lower than existing-key GET because Bloom filters reject non-existent keys before any block I/O.*
 
 ### Reproducing
 

@@ -6,3 +6,4 @@ Testing/
 *.dylib
 .cache/
 compile_commands.json
+RESUME_BULLETS.md
